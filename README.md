@@ -92,8 +92,8 @@ Apple devices may flag shared domains (like Cloudflare's `pub-xxx.r2.dev`) as su
 ## Roadmap
 
 - [ ] Fix star reduction black hole artifact at high values
-- [ ] - [ ] Gradient removal
-- [ ] - [ ] Sharpening / deconvolution
-- [ ] - [ ] Upload custom announcement image between sessions
-- [ ] - [ ] Preview overlay before broadcasting
-- [ ] - [ ] Session history (save/restore stretch per target)
+- [ ] Gradient removal
+- [ ] Sharpening / deconvolution
+- [ ] Upload custom announcement image between sessions
+- [ ] Preview overlay before broadcasting
+- [ ] Session history (save/restore stretch per target)
