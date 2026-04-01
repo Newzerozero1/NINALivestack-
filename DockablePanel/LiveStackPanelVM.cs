@@ -24,7 +24,6 @@ namespace NinaLiveStack.DockablePanel {
         private StretchParams _autoStretch;
         private WhiteBalance _whiteBalance;
         private StackResult _cachedDisplayResult;
-        private StarReductionMap _starReductionMap;
         private int _cachedFrameCount = -1;
         private Timer _debounceTimer;
         private bool _suppressSlider = false;
@@ -86,6 +85,12 @@ namespace NinaLiveStack.DockablePanel {
                 _starReduction = value; RaisePropertyChanged();
                 if (!_suppressSlider) DebouncedRender();
             }
+        }
+
+        private float _sharpen = 0f;
+        public float Sharpen {
+            get => _sharpen;
+            set { _sharpen = value; RaisePropertyChanged(); if (!_suppressSlider) DebouncedRender(); }
         }
 
         // Crop percentages — 0 to 0.30 (30% max from each edge)
@@ -202,6 +207,14 @@ namespace NinaLiveStack.DockablePanel {
         public ICommand ZoomInCommand { get; }
         public ICommand ZoomOutCommand { get; }
         public ICommand ZoomFitCommand { get; }
+        public ICommand CompareCommand { get; }
+
+        private bool _compareMode = false;
+        public bool CompareMode {
+            get => _compareMode;
+            set { _compareMode = value; RaisePropertyChanged(); RaisePropertyChanged(nameof(CompareLabel)); DebouncedRender(); }
+        }
+        public string CompareLabel => _compareMode ? "Edited" : "Raw";
         public ICommand LoadDarkCommand { get; }
         public ICommand LoadFlatCommand { get; }
         public ICommand ClearCalibrationCommand { get; }
@@ -251,7 +264,7 @@ namespace NinaLiveStack.DockablePanel {
                 _loadCts?.Cancel();
                 _suppressSlider = true;
                 Brightness = 0; Contrast = 0; BlackClip = 0; RBalance = 1; GBalance = 1; BBalance = 1;
-                StarReduction = 0; ArcsinhFactor = 100;
+                StarReduction = 0; Sharpen = 0; ArcsinhFactor = 100;
                 CropLeft = 0; CropRight = 0; CropTop = 0; CropBottom = 0; CropAll = 0;
                 _suppressSlider = false;
                 _fullScreenWindow?.UpdateImage(null, 0);
@@ -262,7 +275,7 @@ namespace NinaLiveStack.DockablePanel {
             ResetStretchCommand = new RelayCommand(_ => {
                 _suppressSlider = true;
                 Brightness = 0; Contrast = 0; BlackClip = 0; RBalance = 1; GBalance = 1; BBalance = 1;
-                StarReduction = 0; ArcsinhFactor = 100;
+                StarReduction = 0; Sharpen = 0; ArcsinhFactor = 100;
                 CropLeft = 0; CropRight = 0; CropTop = 0; CropBottom = 0; CropAll = 0;
                 _suppressSlider = false;
                 InvalidateAll();
@@ -276,6 +289,7 @@ namespace NinaLiveStack.DockablePanel {
             ZoomInCommand = new RelayCommand(_ => PanelZoom = Math.Min(8.0, PanelZoom + 0.25));
             ZoomOutCommand = new RelayCommand(_ => PanelZoom = Math.Max(0.25, PanelZoom - 0.25));
             ZoomFitCommand = new RelayCommand(_ => PanelZoom = 1.0);
+            CompareCommand = new RelayCommand(_ => CompareMode = !CompareMode);
 
             LoadDarkCommand = new RelayCommand(_ => LoadCalibrationFrame("dark"));
             LoadFlatCommand = new RelayCommand(_ => LoadCalibrationFrame("flat"));
@@ -314,7 +328,7 @@ namespace NinaLiveStack.DockablePanel {
 
         private void InvalidateAll() {
             _autoStretch = null; _whiteBalance = null;
-            _cachedDisplayResult = null; _starReductionMap = null; _cachedFrameCount = -1;
+            _cachedDisplayResult = null; _cachedFrameCount = -1;
         }
 
         private void InvalidateDisplayCache() {
@@ -372,10 +386,6 @@ namespace NinaLiveStack.DockablePanel {
                 if (EnableBackgroundSub)
                     AdvancedStretch.SubtractBackground(raw.R, raw.G, raw.B);
 
-                // Detect stars on LINEAR data BEFORE stretch (for star reduction later)
-                _starReductionMap = AdvancedStretch.DetectStarsForReduction(
-                    raw.R, raw.G, raw.B, raw.Width, raw.Height);
-
                 _autoStretch = null;
                 _cachedDisplayResult = raw;
                 _cachedFrameCount = fc;
@@ -403,17 +413,24 @@ namespace NinaLiveStack.DockablePanel {
                     _autoStretch, Brightness, Contrast);
             }
 
-            // Star reduction AFTER stretch — uses star positions detected on LINEAR data
-            // so nebula regions are never misidentified as stars
-            if (StarReduction > 0.01f && _starReductionMap != null)
-                AdvancedStretch.ApplyStarReduction(result.R, result.G, result.B,
-                    result.Width, result.Height, StarReduction, _starReductionMap);
+            // Skip processing in compare mode — shows stretch only
+            if (!CompareMode) {
+                // Morphological star reduction — works directly on stretched data
+                if (StarReduction > 0.01f)
+                    AdvancedStretch.MorphologicalStarReduce(result.R, result.G, result.B,
+                        result.Width, result.Height, StarReduction);
+
+                // Wavelet sharpening AFTER stretch and star reduction
+                if (Sharpen > 0.01f)
+                    AdvancedStretch.WaveletSharpen(result.R, result.G, result.B,
+                        result.Width, result.Height, Sharpen);
+            }
 
             var bmp = ImageStretch.FloatToBitmap(result.R, result.G, result.B,
                 result.Width, result.Height, RBalance, GBalance, BBalance, BlackClip);
 
             // Apply crop if any edges are trimmed
-            if (HasCrop && bmp != null)
+            if (!CompareMode && HasCrop && bmp != null)
                 bmp = CropBitmap(bmp, _cropLeft, _cropTop, _cropRight, _cropBottom);
 
             return bmp;
@@ -464,6 +481,7 @@ namespace NinaLiveStack.DockablePanel {
                     FrameCount = _engine.FrameCount;
                     MemoryUsageMB = _engine.GetMemoryUsageMB();
                     AlignStatus = _engine.LastAlignStatus;
+                    RaisePropertyChanged(nameof(PlateSolverStatus));
                     SNRStatus = snr;
                     StatusText = AlignmentEnabled
                         ? $"Stacking... ({FrameCount} frames, {_engine.AlignedCount} aligned, {MemoryUsageMB:F0} MB)"
@@ -512,21 +530,15 @@ namespace NinaLiveStack.DockablePanel {
                         }
 
                         // Star reduction after stretch — detect on linear, apply on stretched
-                        if (StarReduction > 0.01f) {
-                            // For full-res save, we need fresh linear data for star detection
-                            // Re-read the result before WB was applied (get a fresh copy)
-                            var linearCopy = _engine.GetStackedImageResult();
-                            if (linearCopy != null) {
-                                var saveWb = ImageStretch.ComputeWhiteBalance(linearCopy.R, linearCopy.G, linearCopy.B);
-                                ImageStretch.ApplyWhiteBalance(linearCopy.R, linearCopy.G, linearCopy.B, saveWb);
-                                var saveMap = AdvancedStretch.DetectStarsForReduction(
-                                    linearCopy.R, linearCopy.G, linearCopy.B,
-                                    linearCopy.Width, linearCopy.Height);
-                                if (saveMap != null)
-                                    AdvancedStretch.ApplyStarReduction(result.R, result.G, result.B,
-                                        result.Width, result.Height, StarReduction, saveMap);
-                            }
-                        }
+                        // Morphological star reduction on full-res stretched data
+                        if (StarReduction > 0.01f)
+                            AdvancedStretch.MorphologicalStarReduce(result.R, result.G, result.B,
+                                result.Width, result.Height, StarReduction);
+
+                        // Wavelet sharpening on full-res
+                        if (Sharpen > 0.01f)
+                            AdvancedStretch.WaveletSharpen(result.R, result.G, result.B,
+                                result.Width, result.Height, Sharpen);
 
                         var bmp = ImageStretch.FloatToBitmap(result.R, result.G, result.B,
                             result.Width, result.Height, RBalance, GBalance, BBalance, BlackClip);
@@ -558,8 +570,11 @@ namespace NinaLiveStack.DockablePanel {
 
             // Ensure plate solver is configured for post-flip frame recovery
             LiveStackPlugin.EnsurePlateSolver();
+            RaisePropertyChanged(nameof(PlateSolverStatus));
             if (!LiveStackPlugin.PlateSolverAvailable)
                 AlignStatus = "Plate solver not configured — using triangle matching only";
+            else
+                AlignStatus = "";
             InvalidateAll();
             BadFrameStatus = "";
             StatusText = $"Loading {files.Length} files...";
@@ -602,6 +617,7 @@ namespace NinaLiveStack.DockablePanel {
                             StatusText = $"Loading... {loaded}/{files.Length - skippedBad}";
                             FrameCount = _engine.FrameCount;
                             AlignStatus = _engine.LastAlignStatus;
+                            RaisePropertyChanged(nameof(PlateSolverStatus));
                             SNRStatus = _engine.NoiseTracker?.GetStatusText() ?? "";
                         });
                     } catch (Exception ex) {

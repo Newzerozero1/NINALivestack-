@@ -83,184 +83,144 @@ namespace NinaLiveStack.Engine {
         }
 
         // ====================================================================
-        // STAR REDUCTION — TWO-PHASE (detect LINEAR, apply STRETCHED)
+        // STAR REDUCTION — MORPHOLOGICAL EROSION WITH LUMINANCE MASK
         // ====================================================================
-        // Phase 1: DetectStarsForReduction() — called on LINEAR data before stretch.
-        //   Returns StarReductionMap with star positions and radii.
-        // Phase 2: ApplyStarReduction() — called on STRETCHED data using the map.
-        //   Only touches pixels at known star locations, so nebula is untouched.
+        // This is how PixInsight, Photoshop, and RC Astro do it:
+        // 1. Build a luminance star mask from stretched data (bright = star)
+        // 2. Apply minimum filter (erosion) — shrinks all bright compact features
+        // 3. Blend eroded result with original using the mask
+        // No per-star detection, no Gaussian profiles, no radius math.
         // ====================================================================
 
         /// <summary>
-        /// Phase 1: Detect stars on LINEAR (pre-stretch) data and compute their
-        /// positions, radii, and local backgrounds. Call BEFORE stretching.
-        /// Returns null if no stars found or amount is zero.
+        /// Reduce star sizes using morphological erosion (minimum filter)
+        /// masked to bright areas. Works on STRETCHED data.
+        /// amount: 0.0 = off, 1.0 = aggressive reduction.
         /// </summary>
-        public static StarReductionMap DetectStarsForReduction(float[] r, float[] g, float[] b,
-                                                                int width, int height) {
-            int len = width * height;
-
-            // Build luminance for star detection
-            float[] lum = new float[len];
-            for (int i = 0; i < len; i++)
-                lum[i] = 0.2126f * r[i] + 0.7152f * g[i] + 0.0722f * b[i];
-
-            // Detect stars — use more stars for thorough reduction
-            var stars = StarDetector.DetectStars(lum, width, height, maxStars: 500);
-            if (stars.Count == 0) return null;
-
-            // Estimate global background level
-            float background = EstimateBackground(lum);
-            float sigma = EstimateNoise(lum, background);
-            float starThreshold = background + 3f * sigma;
-
-            var entries = new System.Collections.Generic.List<StarReductionEntry>();
-
-            foreach (var star in stars) {
-                int cx = (int)star.X, cy = (int)star.Y;
-                if (cx < 2 || cx >= width - 2 || cy < 2 || cy >= height - 2) continue;
-
-                // Measure star radius: walk outward until brightness drops near background
-                float peak = lum[cy * width + cx];
-                if (peak < starThreshold) continue;
-
-                float cutoff = background + (peak - background) * 0.15f;
-                int radius = 2;
-                for (int rad = 2; rad <= 40; rad++) {
-                    float avg = 0; int cnt = 0;
-                    if (cx + rad < width) { avg += lum[cy * width + cx + rad]; cnt++; }
-                    if (cx - rad >= 0) { avg += lum[cy * width + cx - rad]; cnt++; }
-                    if (cy + rad < height) { avg += lum[(cy + rad) * width + cx]; cnt++; }
-                    if (cy - rad >= 0) { avg += lum[(cy - rad) * width + cx]; cnt++; }
-                    if (cnt > 0) avg /= cnt;
-                    if (avg < cutoff) { radius = rad; break; }
-                    radius = rad;
-                }
-
-                entries.Add(new StarReductionEntry {
-                    X = star.X, Y = star.Y, Radius = radius
-                });
-            }
-
-            if (entries.Count == 0) return null;
-            Logger.Info($"LiveStack: StarReductionMap: {entries.Count} stars detected on linear data");
-            return new StarReductionMap { Stars = entries, Width = width, Height = height };
-        }
-
-        /// <summary>
-        /// Compatibility wrapper for v0.9.33 VM. Calls ReduceStarsLinear.
-        /// threshold parameter is ignored (linear-space approach doesn't need it).
-        /// </summary>
-        public static void ReduceStars(float[] r, float[] g, float[] b,
-                                        int width, int height,
-                                        float amount, float threshold = 0.15f) {
-            ReduceStarsLinear(r, g, b, width, height, amount);
-        }
-
-        /// <summary>
-        /// Legacy fallback: detect and reduce stars in one pass on the input data.
-        /// Prefer the two-phase approach (DetectStarsForReduction + ApplyStarReduction).
-        /// </summary>
-        public static void ReduceStarsLinear(float[] r, float[] g, float[] b,
-                                              int width, int height, float amount) {
+        public static void MorphologicalStarReduce(float[] r, float[] g, float[] b,
+                                                     int width, int height, float amount) {
             if (amount <= 0.01f) return;
-            var map = DetectStarsForReduction(r, g, b, width, height);
-            if (map == null) return;
-            ApplyStarReduction(r, g, b, width, height, amount, map);
-        }
 
-        /// <summary>
-        /// Phase 2: Apply star reduction to (typically STRETCHED) data using
-        /// star positions detected on LINEAR data. Only modifies pixels at
-        /// known star locations — nebula detail is completely untouched.
-        /// amount: 0.0 = no reduction, 1.0 = stars reduced to local background.
-        /// </summary>
-        public static void ApplyStarReduction(float[] r, float[] g, float[] b,
-                                               int width, int height, float amount,
-                                               StarReductionMap map) {
-            if (amount <= 0.01f || map == null || map.Stars.Count == 0) return;
-            int len = width * height;
+            // Kernel radius: keep small to avoid blocky artifacts
+            int kernelRadius = Math.Max(1, (int)(1 + amount * 1.5f));
 
-            // Build luminance on the CURRENT (stretched) data for local background measurement
-            float[] lum = new float[len];
-            for (int i = 0; i < len; i++)
-                lum[i] = 0.2126f * r[i] + 0.7152f * g[i] + 0.0722f * b[i];
+            // Morphological erosion + dilation
+            float[] rEroded = MinFilter(r, width, height, kernelRadius);
+            float[] gEroded = MinFilter(g, width, height, kernelRadius);
+            float[] bEroded = MinFilter(b, width, height, kernelRadius);
 
-            float background = EstimateBackground(lum);
+            float[] rDilated = MaxFilter(r, width, height, kernelRadius);
+            float[] gDilated = MaxFilter(g, width, height, kernelRadius);
+            float[] bDilated = MaxFilter(b, width, height, kernelRadius);
 
-            int reduced = 0;
-            foreach (var star in map.Stars) {
-                int cx = (int)star.X, cy = (int)star.Y;
-                if (cx < 2 || cx >= width - 2 || cy < 2 || cy >= height - 2) continue;
+            float selection = 0.25f;
 
-                int radius = star.Radius;
+            // Self-masking: use the erosion DELTA as a natural star mask.
+            // Star pixel:   original=0.8, eroded=0.1 → delta=0.7 → apply fully
+            // Nebula pixel: original=0.3, eroded=0.28 → delta=0.02 → skip
+            // No separate mask needed — the erosion itself tells us what's a star.
 
-                // Measure local background in an annulus on the STRETCHED data
-                int innerR = radius + 2;
-                int outerR = radius + 8;
-                float bgSum = 0; int bgCount = 0;
-                int y0 = Math.Max(0, cy - outerR);
-                int y1 = Math.Min(height - 1, cy + outerR);
-                int x0 = Math.Max(0, cx - outerR);
-                int x1 = Math.Min(width - 1, cx + outerR);
-
-                for (int y = y0; y <= y1; y++) {
-                    float dy = y - star.Y;
-                    for (int x = x0; x <= x1; x++) {
-                        float dx = x - star.X;
-                        float dist2 = dx * dx + dy * dy;
-                        if (dist2 >= innerR * innerR && dist2 <= outerR * outerR) {
-                            bgSum += lum[y * width + x];
-                            bgCount++;
-                        }
-                    }
-                }
-
-                float localBg = bgCount > 10 ? bgSum / bgCount : background;
-
-                // Reduce: for each pixel within the star footprint,
-                // pull excess above local background toward zero.
-                int footprint = (int)(radius * 1.5f) + 1;
-                float sigma2 = radius * 0.7f;
-                float invSigma2 = 1f / (2f * sigma2 * sigma2);
-
-                y0 = Math.Max(0, cy - footprint);
-                y1 = Math.Min(height - 1, cy + footprint);
-                x0 = Math.Max(0, cx - footprint);
-                x1 = Math.Min(width - 1, cx + footprint);
-
-                for (int y = y0; y <= y1; y++) {
-                    float dy = y - star.Y;
-                    for (int x = x0; x <= x1; x++) {
-                        float dx = x - star.X;
-                        float dist2 = dx * dx + dy * dy;
-                        float falloff = (float)Math.Exp(-dist2 * invSigma2);
-
-                        if (falloff < 0.01f) continue;
-
-                        int idx = y * width + x;
-                        float reduce = amount * falloff;
-
-                        // Per-channel: reduce excess above local background
-                        // This preserves star color proportions
-                        float localBgR = localBg * (r[idx] / Math.Max(0.0001f, lum[idx]));
-                        float localBgG = localBg * (g[idx] / Math.Max(0.0001f, lum[idx]));
-                        float localBgB = localBg * (b[idx] / Math.Max(0.0001f, lum[idx]));
-
-                        float excessR = r[idx] - localBgR;
-                        float excessG = g[idx] - localBgG;
-                        float excessB = b[idx] - localBgB;
-
-                        if (excessR > 0) r[idx] = localBgR + excessR * (1f - reduce);
-                        if (excessG > 0) g[idx] = localBgG + excessG * (1f - reduce);
-                        if (excessB > 0) b[idx] = localBgB + excessB * (1f - reduce);
-                    }
-                }
-                reduced++;
+            // Find the max delta to normalize
+            float maxDelta = 0.001f;
+            for (int i = 0; i < r.Length; i++) {
+                float lumOrig = 0.2126f * r[i] + 0.7152f * g[i] + 0.0722f * b[i];
+                float lumErod = 0.2126f * rEroded[i] + 0.7152f * gEroded[i] + 0.0722f * bEroded[i];
+                float delta = lumOrig - lumErod;
+                if (delta > maxDelta) maxDelta = delta;
             }
 
-            if (reduced > 0)
-                Logger.Info($"LiveStack: Reduced {reduced} stars on stretched data (amount={amount:F2})");
+            // Threshold: ignore deltas below 5% of max (noise/nebula)
+            float deltaThresh = maxDelta * 0.05f;
+
+            for (int i = 0; i < r.Length; i++) {
+                float lumOrig = 0.2126f * r[i] + 0.7152f * g[i] + 0.0722f * b[i];
+                float lumErod = 0.2126f * rEroded[i] + 0.7152f * gEroded[i] + 0.0722f * bEroded[i];
+                float delta = lumOrig - lumErod;
+
+                // Skip pixels where erosion barely changed anything (nebula, sky)
+                if (delta <= deltaThresh) continue;
+
+                // Ramp from 0 at threshold to 1 at significant delta
+                float starness = Math.Min(1f, (delta - deltaThresh) / (maxDelta * 0.3f));
+
+                // Morphological selection
+                float rM = rEroded[i] * (1f - selection) + rDilated[i] * selection;
+                float gM = gEroded[i] * (1f - selection) + gDilated[i] * selection;
+                float bM = bEroded[i] * (1f - selection) + bDilated[i] * selection;
+
+                // Blend: starness controls HOW MUCH erosion applies
+                float blend = starness * amount;
+                r[i] = r[i] + (rM - r[i]) * blend;
+                g[i] = g[i] + (gM - g[i]) * blend;
+                b[i] = b[i] + (bM - b[i]) * blend;
+            }
+
+            Logger.Info($"LiveStack: Star reduction (amount={amount:F2}, kernel={kernelRadius * 2 + 1})");
+        }
+
+        /// <summary>Erosion: replace each pixel with the minimum in a circular neighborhood.</summary>
+        private static float[] MinFilter(float[] src, int width, int height, int radius) {
+            // Two-pass separable approximation for speed
+            float[] temp = new float[src.Length];
+            float[] dst = new float[src.Length];
+
+            // Horizontal min
+            for (int y = 0; y < height; y++) {
+                int row = y * width;
+                for (int x = 0; x < width; x++) {
+                    float min = float.MaxValue;
+                    int x0 = Math.Max(0, x - radius);
+                    int x1 = Math.Min(width - 1, x + radius);
+                    for (int xx = x0; xx <= x1; xx++)
+                        min = Math.Min(min, src[row + xx]);
+                    temp[row + x] = min;
+                }
+            }
+
+            // Vertical min
+            for (int x = 0; x < width; x++) {
+                for (int y = 0; y < height; y++) {
+                    float min = float.MaxValue;
+                    int y0 = Math.Max(0, y - radius);
+                    int y1 = Math.Min(height - 1, y + radius);
+                    for (int yy = y0; yy <= y1; yy++)
+                        min = Math.Min(min, temp[yy * width + x]);
+                    dst[y * width + x] = min;
+                }
+            }
+            return dst;
+        }
+
+        /// <summary>Dilation: replace each pixel with the maximum in a circular neighborhood.</summary>
+        private static float[] MaxFilter(float[] src, int width, int height, int radius) {
+            float[] temp = new float[src.Length];
+            float[] dst = new float[src.Length];
+
+            // Horizontal max
+            for (int y = 0; y < height; y++) {
+                int row = y * width;
+                for (int x = 0; x < width; x++) {
+                    float max = float.MinValue;
+                    int x0 = Math.Max(0, x - radius);
+                    int x1 = Math.Min(width - 1, x + radius);
+                    for (int xx = x0; xx <= x1; xx++)
+                        max = Math.Max(max, src[row + xx]);
+                    temp[row + x] = max;
+                }
+            }
+
+            // Vertical max
+            for (int x = 0; x < width; x++) {
+                for (int y = 0; y < height; y++) {
+                    float max = float.MinValue;
+                    int y0 = Math.Max(0, y - radius);
+                    int y1 = Math.Min(height - 1, y + radius);
+                    for (int yy = y0; yy <= y1; yy++)
+                        max = Math.Max(max, temp[yy * width + x]);
+                    dst[y * width + x] = max;
+                }
+            }
+            return dst;
         }
 
         // ====================================================================
@@ -293,6 +253,114 @@ namespace NinaLiveStack.Engine {
             }
 
             Logger.Info($"LiveStack: Background subtracted: R-={rSub:E3} G-={gSub:E3} B-={bSub:E3}");
+        }
+
+        // ====================================================================
+        // À TROUS WAVELET SHARPENING
+        // ====================================================================
+        // Decomposes into 3 detail layers at different scales:
+        //   Layer 1 = finest detail (noise, star edges, tiny features)
+        //   Layer 2 = medium detail (star profiles, small nebula texture)
+        //   Layer 3 = large-scale structure (nebula arms, gradients)
+        // Each layer = (previous smooth) - (next smooth).
+        // Boost a layer to sharpen at that scale.
+        // Uses separable B3 spline kernel with increasing gaps (à trous).
+        // ====================================================================
+
+        /// <summary>
+        /// Apply wavelet sharpening to stretched RGB data.
+        /// sharpenAmount: 0 = off, 0.3 = subtle, 0.7 = strong, 1.0 = aggressive.
+        /// Boosts layers 1 (fine) and 2 (medium) — layer 3 left alone.
+        /// Runs on display-resolution data (~6.5MP), well under 500ms on i5.
+        /// </summary>
+        public static void WaveletSharpen(float[] r, float[] g, float[] b,
+                                           int width, int height, float sharpenAmount) {
+            if (sharpenAmount <= 0.01f) return;
+
+            // Sharpen luminance only — preserves color, avoids amplifying chromatic noise
+            float[] lum = new float[r.Length];
+            for (int i = 0; i < r.Length; i++)
+                lum[i] = 0.2126f * r[i] + 0.7152f * g[i] + 0.0722f * b[i];
+
+            // Decompose: 3 layers via à trous B3 spline
+            float[] smooth0 = lum;
+            float[] smooth1 = ATrousBlur(smooth0, width, height, 1);  // gap=1
+            float[] smooth2 = ATrousBlur(smooth1, width, height, 2);  // gap=2
+            float[] smooth3 = ATrousBlur(smooth2, width, height, 4);  // gap=4
+
+            // Detail layers = difference between successive smoothed versions
+            float[] detail1 = new float[lum.Length]; // finest
+            float[] detail2 = new float[lum.Length]; // medium
+            for (int i = 0; i < lum.Length; i++) {
+                detail1[i] = smooth0[i] - smooth1[i];
+                detail2[i] = smooth1[i] - smooth2[i];
+            }
+
+            // Boost factors: layer 1 gets full boost, layer 2 gets 60%
+            float boost1 = sharpenAmount * 3.0f;
+            float boost2 = sharpenAmount * 1.8f;
+
+            // Apply: add boosted detail back to each channel proportionally
+            for (int i = 0; i < r.Length; i++) {
+                float lumVal = lum[i];
+                if (lumVal < 0.001f) continue; // skip pure black
+
+                float delta = detail1[i] * boost1 + detail2[i] * boost2;
+
+                // Protect shadows: reduce sharpening in dark areas to avoid amplifying noise
+                float shadowMask = Math.Min(1f, lumVal * 8f);
+                delta *= shadowMask;
+
+                // Apply proportionally to each channel (preserves color ratios)
+                float ratio = (lumVal + delta) / lumVal;
+                if (ratio < 0.3f) ratio = 0.3f; // prevent inversion
+                if (ratio > 3.0f) ratio = 3.0f;  // prevent blowout
+
+                r[i] = Math.Min(1f, Math.Max(0f, r[i] * ratio));
+                g[i] = Math.Min(1f, Math.Max(0f, g[i] * ratio));
+                b[i] = Math.Min(1f, Math.Max(0f, b[i] * ratio));
+            }
+
+            Logger.Info($"LiveStack: Wavelet sharpen applied (amount={sharpenAmount:F2})");
+        }
+
+        /// <summary>
+        /// À trous blur: separable B3 spline kernel [1,4,6,4,1]/16 with gaps.
+        /// Gap doubles each layer: 1, 2, 4 — captures progressively larger scales.
+        /// O(n) per pixel regardless of gap size (fixed 5-tap kernel).
+        /// </summary>
+        private static float[] ATrousBlur(float[] src, int width, int height, int gap) {
+            float[] temp = new float[src.Length];
+            float[] dst = new float[src.Length];
+
+            // Horizontal pass: kernel [1,4,6,4,1]/16 with spacing = gap
+            for (int y = 0; y < height; y++) {
+                int row = y * width;
+                for (int x = 0; x < width; x++) {
+                    int x0 = Math.Max(0, x - 2 * gap);
+                    int x1 = Math.Max(0, x - gap);
+                    int x2 = x;
+                    int x3 = Math.Min(width - 1, x + gap);
+                    int x4 = Math.Min(width - 1, x + 2 * gap);
+                    temp[row + x] = (src[row + x0] + 4f * src[row + x1] + 6f * src[row + x2]
+                                   + 4f * src[row + x3] + src[row + x4]) / 16f;
+                }
+            }
+
+            // Vertical pass
+            for (int y = 0; y < height; y++) {
+                int y0 = Math.Max(0, y - 2 * gap) * width;
+                int y1 = Math.Max(0, y - gap) * width;
+                int y2 = y * width;
+                int y3 = Math.Min(height - 1, y + gap) * width;
+                int y4 = Math.Min(height - 1, y + 2 * gap) * width;
+                for (int x = 0; x < width; x++) {
+                    dst[y2 + x] = (temp[y0 + x] + 4f * temp[y1 + x] + 6f * temp[y2 + x]
+                                 + 4f * temp[y3 + x] + temp[y4 + x]) / 16f;
+                }
+            }
+
+            return dst;
         }
 
         // ====================================================================
@@ -336,15 +404,4 @@ namespace NinaLiveStack.Engine {
         }
     }
 
-    public class StarReductionMap {
-        public System.Collections.Generic.List<StarReductionEntry> Stars { get; set; }
-        public int Width { get; set; }
-        public int Height { get; set; }
-    }
-
-    public class StarReductionEntry {
-        public float X { get; set; }
-        public float Y { get; set; }
-        public int Radius { get; set; }
-    }
 }

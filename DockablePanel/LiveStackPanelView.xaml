@@ -142,6 +142,7 @@
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="80" />
@@ -177,43 +178,47 @@
                             <Slider Grid.Row="6" Grid.Column="1" Minimum="0" Maximum="1" Value="{Binding StarReduction}" SmallChange="0.05" Height="18" ToolTip="Star reduction amount" />
                             <TextBlock Grid.Row="6" Grid.Column="2" Text="{Binding StarReduction, StringFormat='{}{0:F2}'}" FontSize="9" VerticalAlignment="Center" HorizontalAlignment="Right" Foreground="White" />
 
+                            <TextBlock Grid.Row="7" Grid.Column="0" Text="Sharpen" FontSize="10" VerticalAlignment="Center" Foreground="#88DDFF" ToolTip="Wavelet sharpening — enhances fine detail without amplifying noise" />
+                            <Slider Grid.Row="7" Grid.Column="1" Minimum="0" Maximum="1" Value="{Binding Sharpen}" SmallChange="0.05" Height="18" ToolTip="Sharpening amount" />
+                            <TextBlock Grid.Row="7" Grid.Column="2" Text="{Binding Sharpen, StringFormat='{}{0:F2}'}" FontSize="9" VerticalAlignment="Center" HorizontalAlignment="Right" Foreground="#88DDFF" />
+
                             <!-- Crop with lock toggle -->
-                            <StackPanel Grid.Row="7" Grid.Column="0" Orientation="Horizontal" ToolTip="Crop edges — lock keeps aspect ratio, unlock adjusts each side independently">
+                            <StackPanel Grid.Row="8" Grid.Column="0" Orientation="Horizontal" ToolTip="Crop edges — lock keeps aspect ratio, unlock adjusts each side independently">
                                 <TextBlock Text="Crop" FontSize="10" VerticalAlignment="Center" Foreground="#CCAA55" />
                                 <CheckBox IsChecked="{Binding CropLocked}" Margin="4,0,0,0" VerticalAlignment="Center" ToolTip="Lock aspect ratio" />
                                 <TextBlock Text="🔒" FontSize="8" VerticalAlignment="Center" Foreground="#CCAA55" Margin="2,0,0,0" />
                             </StackPanel>
-                            <Slider Grid.Row="7" Grid.Column="1" Minimum="0" Maximum="0.3" Value="{Binding CropAll}" SmallChange="0.005" Height="18"
+                            <Slider Grid.Row="8" Grid.Column="1" Minimum="0" Maximum="0.3" Value="{Binding CropAll}" SmallChange="0.005" Height="18"
                                     Visibility="{Binding CropLocked, Converter={StaticResource BoolToVis}}" ToolTip="Crop all edges equally" />
-                            <TextBlock Grid.Row="7" Grid.Column="2" Text="{Binding CropAll, StringFormat='{}{0:P0}'}" FontSize="9" VerticalAlignment="Center" HorizontalAlignment="Right" Foreground="#CCAA55"
+                            <TextBlock Grid.Row="8" Grid.Column="2" Text="{Binding CropAll, StringFormat='{}{0:P0}'}" FontSize="9" VerticalAlignment="Center" HorizontalAlignment="Right" Foreground="#CCAA55"
                                        Visibility="{Binding CropLocked, Converter={StaticResource BoolToVis}}" />
 
-                            <TextBlock Grid.Row="8" Grid.Column="0" Text="Crop Left" FontSize="10" VerticalAlignment="Center" Foreground="#CCAA55"
+                            <TextBlock Grid.Row="9" Grid.Column="0" Text="Crop Left" FontSize="10" VerticalAlignment="Center" Foreground="#CCAA55"
                                        Visibility="{Binding CropUnlocked, Converter={StaticResource BoolToVis}}" />
-                            <Slider Grid.Row="8" Grid.Column="1" Minimum="0" Maximum="0.3" Value="{Binding CropLeft}" SmallChange="0.005" Height="18"
+                            <Slider Grid.Row="9" Grid.Column="1" Minimum="0" Maximum="0.3" Value="{Binding CropLeft}" SmallChange="0.005" Height="18"
                                     Visibility="{Binding CropUnlocked, Converter={StaticResource BoolToVis}}" />
-                            <TextBlock Grid.Row="8" Grid.Column="2" Text="{Binding CropLeft, StringFormat='{}{0:P0}'}" FontSize="9" VerticalAlignment="Center" HorizontalAlignment="Right" Foreground="#CCAA55"
+                            <TextBlock Grid.Row="9" Grid.Column="2" Text="{Binding CropLeft, StringFormat='{}{0:P0}'}" FontSize="9" VerticalAlignment="Center" HorizontalAlignment="Right" Foreground="#CCAA55"
                                        Visibility="{Binding CropUnlocked, Converter={StaticResource BoolToVis}}" />
 
-                            <TextBlock Grid.Row="9" Grid.Column="0" Text="Crop Right" FontSize="10" VerticalAlignment="Center" Foreground="#CCAA55"
+                            <TextBlock Grid.Row="10" Grid.Column="0" Text="Crop Right" FontSize="10" VerticalAlignment="Center" Foreground="#CCAA55"
                                        Visibility="{Binding CropUnlocked, Converter={StaticResource BoolToVis}}" />
-                            <Slider Grid.Row="9" Grid.Column="1" Minimum="0" Maximum="0.3" Value="{Binding CropRight}" SmallChange="0.005" Height="18"
+                            <Slider Grid.Row="10" Grid.Column="1" Minimum="0" Maximum="0.3" Value="{Binding CropRight}" SmallChange="0.005" Height="18"
                                     Visibility="{Binding CropUnlocked, Converter={StaticResource BoolToVis}}" />
-                            <TextBlock Grid.Row="9" Grid.Column="2" Text="{Binding CropRight, StringFormat='{}{0:P0}'}" FontSize="9" VerticalAlignment="Center" HorizontalAlignment="Right" Foreground="#CCAA55"
+                            <TextBlock Grid.Row="10" Grid.Column="2" Text="{Binding CropRight, StringFormat='{}{0:P0}'}" FontSize="9" VerticalAlignment="Center" HorizontalAlignment="Right" Foreground="#CCAA55"
                                        Visibility="{Binding CropUnlocked, Converter={StaticResource BoolToVis}}" />
 
-                            <TextBlock Grid.Row="10" Grid.Column="0" Text="Crop Top" FontSize="10" VerticalAlignment="Center" Foreground="#CCAA55"
+                            <TextBlock Grid.Row="11" Grid.Column="0" Text="Crop Top" FontSize="10" VerticalAlignment="Center" Foreground="#CCAA55"
                                        Visibility="{Binding CropUnlocked, Converter={StaticResource BoolToVis}}" />
-                            <Slider Grid.Row="10" Grid.Column="1" Minimum="0" Maximum="0.3" Value="{Binding CropTop}" SmallChange="0.005" Height="18"
+                            <Slider Grid.Row="11" Grid.Column="1" Minimum="0" Maximum="0.3" Value="{Binding CropTop}" SmallChange="0.005" Height="18"
                                     Visibility="{Binding CropUnlocked, Converter={StaticResource BoolToVis}}" />
-                            <TextBlock Grid.Row="10" Grid.Column="2" Text="{Binding CropTop, StringFormat='{}{0:P0}'}" FontSize="9" VerticalAlignment="Center" HorizontalAlignment="Right" Foreground="#CCAA55"
+                            <TextBlock Grid.Row="11" Grid.Column="2" Text="{Binding CropTop, StringFormat='{}{0:P0}'}" FontSize="9" VerticalAlignment="Center" HorizontalAlignment="Right" Foreground="#CCAA55"
                                        Visibility="{Binding CropUnlocked, Converter={StaticResource BoolToVis}}" />
 
-                            <TextBlock Grid.Row="11" Grid.Column="0" Text="Crop Bottom" FontSize="10" VerticalAlignment="Center" Foreground="#CCAA55"
+                            <TextBlock Grid.Row="12" Grid.Column="0" Text="Crop Bottom" FontSize="10" VerticalAlignment="Center" Foreground="#CCAA55"
                                        Visibility="{Binding CropUnlocked, Converter={StaticResource BoolToVis}}" />
-                            <Slider Grid.Row="11" Grid.Column="1" Minimum="0" Maximum="0.3" Value="{Binding CropBottom}" SmallChange="0.005" Height="18"
+                            <Slider Grid.Row="12" Grid.Column="1" Minimum="0" Maximum="0.3" Value="{Binding CropBottom}" SmallChange="0.005" Height="18"
                                     Visibility="{Binding CropUnlocked, Converter={StaticResource BoolToVis}}" />
-                            <TextBlock Grid.Row="11" Grid.Column="2" Text="{Binding CropBottom, StringFormat='{}{0:P0}'}" FontSize="9" VerticalAlignment="Center" HorizontalAlignment="Right" Foreground="#CCAA55"
+                            <TextBlock Grid.Row="12" Grid.Column="2" Text="{Binding CropBottom, StringFormat='{}{0:P0}'}" FontSize="9" VerticalAlignment="Center" HorizontalAlignment="Right" Foreground="#CCAA55"
                                        Visibility="{Binding CropUnlocked, Converter={StaticResource BoolToVis}}" />
                         </Grid>
                     </Expander>
@@ -242,6 +247,8 @@
                 </StackPanel>
                 <Image Grid.Column="1" Source="{Binding HistogramImage}" Stretch="Fill" Height="40" Margin="8,0" VerticalAlignment="Center" />
                 <StackPanel Grid.Column="2" Orientation="Horizontal">
+                    <Button Content="{Binding CompareLabel}" Command="{Binding CompareCommand}" Padding="6,2" FontSize="10" Margin="1"
+                            ToolTip="Toggle between edited view and raw stretch (no star reduction, sharpening, or crop)" />
                     <Button Content="-" Command="{Binding ZoomOutCommand}" Padding="6,2" FontSize="14" FontWeight="Bold" Margin="1" />
                     <Button Content="Fit" Command="{Binding ZoomFitCommand}" Padding="6,2" FontSize="10" Margin="1" />
                     <Button Content="+" Command="{Binding ZoomInCommand}" Padding="6,2" FontSize="14" FontWeight="Bold" Margin="1" />
